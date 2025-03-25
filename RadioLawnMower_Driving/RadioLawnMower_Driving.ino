@@ -1,6 +1,9 @@
 
-#include "PwmReader.h"
 #include <Ewma.h>
+#include <Wire.h>
+#include "PwmReader.h"
+
+#define IS_DEBUG 0
 
 enum MODE_TYPE {
   TURN_BY_WHEELS,
@@ -11,7 +14,11 @@ const MODE_TYPE MODE = TURN_BY_STEPPER;
 
 #define THROTTLE 0  // Channel 1
 #define ARMED 1     // Channel 4
+#define DIRECTION 2     // Channel 5
 
+#define RC_SPEED_PIN 2
+#define RC_ARMED_PIN 3
+#define RC_DIRECTION_PIN 4
 
 #define LEFT_MOTOR_PIN 6
 #define RIGHT_MOTOR_PIN 5
@@ -19,8 +26,12 @@ const MODE_TYPE MODE = TURN_BY_STEPPER;
 #define RIGHT_DIRECTION_PIN 7
 #define STOP_PIN 9
 
-const byte RC_PINS[] = { 2, 3 };  // Arduino Uno digital pins // 5, 6, 7
-const byte NUM_CHANNELS = 2;
+#define WIRE_SLAVE_ID 6
+unsigned long wire_prev_millis;
+unsigned long wire_transfer_interval = 200;
+
+const byte RC_PINS[] = { RC_SPEED_PIN, RC_ARMED_PIN, RC_DIRECTION_PIN };  // Arduino Uno digital pins // 5, 6, 7
+const byte NUM_CHANNELS = 3;
 
 // Variables to store PWM values
 volatile unsigned long rising_start[NUM_CHANNELS];
@@ -30,6 +41,8 @@ volatile boolean new_pwm_signal[NUM_CHANNELS];
 volatile int THROTTLE_VALUE = 0;
 volatile int ARMED_VALUE = 0;
 volatile bool IS_ARMED = false;
+volatile bool INVERSED_DIRECTION = true;
+volatile int DIRECTION_VALUE = 0;
 
 const float filter = 0.1;  // => 1 / number of samples
 
@@ -52,6 +65,8 @@ volatile bool isForward = true;
 
 void setup() {
   Serial.begin(115200);
+  // Start the I2C Bus as Master
+  Wire.begin();
 
   // Configure pins and attach interrupts
   for (byte i = 0; i < NUM_CHANNELS; i++) {
@@ -210,70 +225,10 @@ unsigned long msecLst;
 #define TWO_SEC 2000
 
 void loop() {
-  // State Machine
 
-  // // Print PWM values when new signals are received
-  // for (byte i = 0; i < NUM_CHANNELS; i++) {
-  //   //if (new_pwm_signal[i]) {
-  //     Serial.print("CH");
-  //     Serial.print(i + 1);
-  //     Serial.print(":");
-  //     Serial.println(pwm_values[i]);
+  printDebug();
 
-  //     // switch(i)
-  //     // {
-  //     //   case ROLL:
-  //     //     Serial.print(roll.mapTo(pwm_values[i]));
-  //     //     break;
-  //     //   case PITCH:
-  //     //     Serial.print(pitch.mapTo(pwm_values[i]));
-  //     //     break;
-  //     //   case THROTTLE:
-  //     //     Serial.print(throttle.mapTo(pwm_values[i]));
-  //     //     break;
-  //     // }
-
-  //     // Serial.print(",");
-  //     new_pwm_signal[i] = false;
-  //   //}
-  // }
-
-  // Serial.println();
-
-  // return;
-
-
-
-
-  unsigned long msec = millis();
-
-  if ((msec - msecLst) > TWO_SEC) {
-    msecLst = msec;
-    count++;
-    //Serial.println (count);
-
-    Serial.print("state: ");
-    printState(state, false);
-
-    Serial.print(", throttle: ");
-    Serial.print(THROTTLE_VALUE);
-
-    Serial.print(", direction: ");
-    if (isForward) {
-      Serial.print("FORWARD");
-    } else {
-      Serial.print("BACKWARD");
-    }
-
-    Serial.print(", armed: ");
-
-    if (IS_ARMED) {
-      Serial.print("YES -> ");
-    } else {
-      Serial.print("NO -> ");
-    }
-    Serial.println(ARMED_VALUE);
-  }
+  sendWire();
 
   if (!IS_ARMED) {
     stop_motors();
@@ -343,14 +298,96 @@ void handle_interrupt(byte channel) {
       }
 
       switch (channel) {
+        case DIRECTION:
+          DIRECTION_VALUE = pwm_values[channel];
+          INVERSED_DIRECTION = DIRECTION_VALUE < 1900 || DIRECTION_VALUE > 2200;
+
         case ARMED:
           ARMED_VALUE = pwm_values[channel];  //pitch.mapTo(pwm_values[channel]);
-          IS_ARMED = ARMED_VALUE > 1900;
+          IS_ARMED = ARMED_VALUE > 1900 && ARMED_VALUE < 3000;
+
           break;
         case THROTTLE:
           THROTTLE_VALUE = throttle.mapTo(pwm_values[channel]);
+
+          if(INVERSED_DIRECTION)
+          {
+            THROTTLE_VALUE *= -1;
+          }
           break;
       }
     }
+  }
+}
+
+void sendWire()
+{
+  unsigned long msec = millis();
+
+  if ((msec - wire_prev_millis) > wire_transfer_interval) {
+    wire_prev_millis = msec;
+
+    char command;
+    if (IS_ARMED) {
+      command = 'a';
+    } else {
+      command = 'u';
+    }
+    
+    Wire.beginTransmission(WIRE_SLAVE_ID); // transmit to device #9
+    Wire.write(command);              // sends x 
+    Wire.endTransmission();    // stop transmitting
+
+    if(IS_DEBUG)
+    {
+      Serial.print("Direction: ");
+      Serial.print(DIRECTION_VALUE);  
+
+      Serial.print("command: ");
+      Serial.print(command);
+      Serial.print(", armed: ");
+
+      if (IS_ARMED) {
+        Serial.print("YES -> ");
+      } else {
+        Serial.print("NO -> ");
+      }
+      Serial.println(ARMED_VALUE);
+    }
+  }
+}
+
+void printDebug()
+{
+  if(!IS_DEBUG) return;
+
+  unsigned long msec = millis();
+
+  if ((msec - msecLst) > TWO_SEC) {
+    msecLst = msec;
+    count++;
+    //Serial.println (count);
+
+    Serial.print("state: ");
+    printState(state, false);
+
+    Serial.print(", throttle: ");
+    Serial.print(THROTTLE_VALUE);
+
+    Serial.print(", direction: ");
+    if (isForward) {
+      Serial.print("FORWARD");
+    } else {
+      Serial.print("BACKWARD");
+    }
+
+    Serial.print(", armed: ");
+
+    if (IS_ARMED) {
+      Serial.print("YES -> ");
+    } else {
+      Serial.print("NO -> ");
+    }
+    Serial.println(ARMED_VALUE);
   }
 }
