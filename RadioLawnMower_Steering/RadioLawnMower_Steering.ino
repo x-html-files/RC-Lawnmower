@@ -3,7 +3,7 @@
 #include <Wire.h>
 #include "PwmReader.h"
 
-#define IS_DEBUG 0
+#define IS_DEBUG 1
 
 // STEPPER MOTOR
 #define motorInterfaceType 1
@@ -98,20 +98,26 @@ char command = 0;
 void receiveEvent(int bytes) {
   command = Wire.read();    // read one character from the I2C
   
+
+  bool new_is_armed;
   if(command == 'a')
   {
-    IS_ARMED = true;
+    new_is_armed = true;
     last_armed_millis = millis();
   }else
   {
-    IS_ARMED = false;
+    new_is_armed = false;
   }
 
   if(IS_DEBUG)
   {
-    Serial.print("command: ");
-    Serial.println(command);
+    if(new_is_armed != IS_ARMED)
+    {
+      Serial.print("command: ");
+      Serial.println(command);
+    }
   }
+  IS_ARMED = new_is_armed;
 }
 
 volatile int potStep = 0;
@@ -236,8 +242,13 @@ bool is_armed()
   }
 
   unsigned long currentMillis = millis();
-  if (currentMillis - last_armed_millis > max_no_transfer_millis) 
+  long current_delay = (currentMillis - last_armed_millis);
+  if (current_delay > 0  && current_delay > max_no_transfer_millis) 
   {
+    Serial.println("Disarmed because of the delay:");
+    Serial.print(current_delay);
+    Serial.print(" > ");
+    Serial.println(max_no_transfer_millis);
     IS_ARMED = false;
     return false;
   }

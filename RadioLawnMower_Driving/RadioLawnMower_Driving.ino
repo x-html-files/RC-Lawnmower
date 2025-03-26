@@ -279,6 +279,30 @@ ISR(PCINT2_vect) {
   }
 }
 
+volatile int disarmed_counter = 0;
+const int disarmed_minimum_samples = 5;
+
+void set_isarmed(int val)
+{
+  bool is_armed = val > 1900 && val < 3000;
+
+  if(is_armed)
+  {
+    IS_ARMED = true;
+    disarmed_counter = 0;
+    return;
+  }
+
+  disarmed_counter++;
+
+  if(disarmed_counter >= disarmed_minimum_samples)
+  {
+    IS_ARMED = false;
+  }
+}
+
+
+
 // Generic interrupt handler
 void handle_interrupt(byte channel) {
   uint8_t trigger = digitalRead(RC_PINS[channel]);
@@ -304,8 +328,7 @@ void handle_interrupt(byte channel) {
 
         case ARMED:
           ARMED_VALUE = pwm_values[channel];  //pitch.mapTo(pwm_values[channel]);
-          IS_ARMED = ARMED_VALUE > 1900 && ARMED_VALUE < 3000;
-
+          set_isarmed(ARMED_VALUE);
           break;
         case THROTTLE:
           THROTTLE_VALUE = throttle.mapTo(pwm_values[channel]);
