@@ -3,7 +3,7 @@
 #include <Wire.h>
 #include "PwmReader.h"
 
-#define IS_DEBUG 0
+#define IS_DEBUG 1
 
 enum MODE_TYPE {
   TURN_BY_WHEELS,
@@ -25,6 +25,7 @@ const MODE_TYPE MODE = TURN_BY_STEPPER;
 #define LEFT_DIRECTION_PIN 8
 #define RIGHT_DIRECTION_PIN 7
 #define STOP_PIN 9
+const int ledPin = LED_BUILTIN;
 
 #define WIRE_SLAVE_ID 6
 unsigned long wire_prev_millis;
@@ -74,7 +75,7 @@ void setup() {
     // Enable internal pullup to prevent floating inputs
     digitalWrite(RC_PINS[i], HIGH);
   }
-
+  int i = A2;
   // Hardware interrupts for Uno pins 2 and 3
   attachInterrupt(digitalPinToInterrupt(2), handle_interrupt_0, CHANGE);
   attachInterrupt(digitalPinToInterrupt(3), handle_interrupt_1, CHANGE);
@@ -91,6 +92,9 @@ void setup() {
   pinMode(LEFT_DIRECTION_PIN, OUTPUT);
   pinMode(RIGHT_DIRECTION_PIN, OUTPUT);
   pinMode(STOP_PIN, OUTPUT);
+  pinMode(STOP_PIN, OUTPUT);
+
+  pinMode(ledPin, OUTPUT);
 
   // speed
   throttle.setLimits(980, 980, 2000, 1490, 20);
@@ -224,8 +228,29 @@ unsigned long msecLst;
 
 #define TWO_SEC 2000
 
+void blink_led()
+{
+  static int ledState = LOW;
+  const static long interval = 1000;
+  static unsigned long previousMillis = 0;
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    // save the last time you blinked the LED
+    previousMillis = currentMillis;
+
+    if (ledState == LOW) {
+      ledState = HIGH;
+    } else {
+      ledState = LOW;
+    }
+    digitalWrite(ledPin, ledState);
+  }
+}
+
 void loop() {
 
+  blink_led();
   printDebug();
 
   sendWire();
