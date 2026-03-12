@@ -1,12 +1,41 @@
-#include "PwmReader.h"
 #include <elapsedMillis.h>
+#include "PwmReader.h"
+#include "Motor.h"
 
 #define IS_DEBUG 1
+///////// PINS /////////////////////////////////////////////////////////////////////////////
 
+// RC
 #define RC_THROTTLE_PIN 19
 #define RC_ARMED_PIN 20
 #define RC_DIRECTION_PIN 21
 #define RC_STEERING_PIN 18
+
+// Motor Front Left
+#define M1_DIR_PIN 7
+#define M1_BRAKE_PIN 6
+#define M1_THROTTLE_PIN 5
+#define M1_SPEED_FEEDBACK_PIN 2
+
+// Motor Front Right
+#define M2_DIR_PIN 10
+#define M2_BRAKE_PIN 9
+#define M2_THROTTLE_PIN 8
+#define M2_SPEED_FEEDBACK_PIN 3
+
+// Motor Back Left
+#define M3_DIR_PIN 42
+#define M3_BRAKE_PIN 43
+#define M3_THROTTLE_PIN 44
+#define M3_SPEED_FEEDBACK_PIN A8
+
+// Motor Back Right
+#define M4_DIR_PIN 48
+#define M4_BRAKE_PIN 47
+#define M4_THROTTLE_PIN 46
+#define M4_SPEED_FEEDBACK_PIN A9
+
+//////////////////////////////////////////////////////////////////////////////////////////
 
 #define FAILSAFE_MIN 1480
 #define FAILSAFE_MAX 1496
@@ -30,6 +59,18 @@ typedef enum steering_e {
   STEER_HALF_RIGHT,
   STEER_FULL_RIGHT,
 } steering_e;
+
+typedef enum direction_state_e {
+  STOPPED = 0,
+  CHANGING_DIRECTION,
+  MOVING_BACKWARD,
+  MOVING_FORWARD,
+} direction_state_e;
+
+volatile direction_state_e direction_state = STOPPED;
+volatile direction_state_e prev_direction_state = STOPPED;
+volatile bool previous_isForward = true;
+volatile bool isForward = true;
 
 
 const byte RC_PINS[SIGNAL_COUNT] = {
@@ -62,6 +103,11 @@ const float filter = 0.2;  // => 1 / number of samples
 PwmReader throttle(filter);
 PwmReader steering(filter);
 
+Motor motorFrontLeft(M1_DIR_PIN, M1_BRAKE_PIN, M1_THROTTLE_PIN, false);
+Motor motorFrontRight(M2_DIR_PIN, M2_BRAKE_PIN, M2_THROTTLE_PIN, true);
+Motor motorBackLeft(M3_DIR_PIN, M3_BRAKE_PIN, M3_THROTTLE_PIN, false);
+Motor motorBackRight(M4_DIR_PIN, M4_BRAKE_PIN, M4_THROTTLE_PIN, true);
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Starting...");
@@ -83,6 +129,8 @@ void setup() {
 
   steering.setLimits(880, 1700, 1380, 60);
   steering.setMapping(0, 4);
+
+  motors_stop();
   Serial.println("Started.");
 }
 
@@ -92,7 +140,7 @@ void printDebug() {
   Serial.print("Connected:");
   Serial.print(IS_CONNECTED);
 
- 
+
   // Serial.print("Throttle Map:");
   // Serial.print(THROTTLE_VALUE);
   // Serial.print(", ArmedVal:");
@@ -103,7 +151,7 @@ void printDebug() {
   //Serial.print(", Direction:");
   //Serial.print(pwm_values[SIGNAL_DIRECTION]);
   //Serial.print(INVERSED_DIRECTION);
- Serial.print(", Throttle:");
+  Serial.print(", Throttle:");
   Serial.print(pwm_values[SIGNAL_THROTTLE]);
 
   Serial.print(", Steering:");
@@ -114,6 +162,10 @@ void printDebug() {
   // Serial.print(", WasDisArmed:");
   // Serial.print(WAS_DISARMED ? 2000 : 0);
   Serial.println();
+}
+
+bool stateHasChanged() {
+  return direction_state != prev_direction_state;
 }
 
 elapsedMillis sincePrint;
@@ -127,12 +179,176 @@ void loop() {
     mapValues();
   }
 
+  if (!IS_ARMED) {
+    motors_brakes_on();
+    return;
+  }
+
+  motors_brakes_off();
+
+  switch (direction_state) {
+    case STOPPED:
+      if (stateHasChanged()) {
+        handleStopOnEntry();
+      } else {
+        handleStop();
+      }
+      break;
+
+    case CHANGING_DIRECTION:
+      handleChangeDirection();
+      break;
+
+    case MOVING_BACKWARD:
+    case MOVING_FORWARD:
+      handleMoving();
+      break;
+  }
+
+
   if (sincePrint > 1000) {
-      sincePrint = 0;
-      printDebug();
-    }
+    sincePrint = 0;
+    printDebug();
+  }
 
   delay(20);
+}
+
+void handleChangeDirection() {
+  motors_stop();
+  Serial.println("Stopped");
+  delay(500);
+
+  Serial.print("Moving ");
+  if (isForward) {
+    Serial.println("forward");
+  } else {
+    Serial.println("backward");
+  }
+  // Change direction
+
+  start_moving();
+  // Change state to moving
+  if (isForward) {
+    changeState(MOVING_FORWARD);
+  } else {
+    changeState(MOVING_BACKWARD);
+  }
+}
+
+void handleMoving() {
+
+  if (THROTTLE_VALUE == 0) {
+    changeState(STOPPED);
+    return;
+  }
+
+  isForward = THROTTLE_VALUE > 0;
+  if (previous_isForward != isForward) {
+    previous_isForward = isForward;
+    changeState(CHANGING_DIRECTION);
+    return;
+  }
+
+  uint8_t speed = abs(THROTTLE_VALUE);
+  switch (STEERING_VALUE) {
+    case STEER_FULL_LEFT:
+      motorFrontLeft.setSpeed(speed, !isForward);
+      motorFrontRight.setSpeed(speed, isForward);
+      motorBackLeft.setSpeed(speed, !isForward);
+      motorBackRight.setSpeed(speed, isForward);
+      break;
+    case STEER_HALF_LEFT:
+      motorFrontLeft.setSpeed(speed, 0);
+      motorFrontRight.setSpeed(speed, isForward);
+      motorBackLeft.setSpeed(speed, 0);
+      motorBackRight.setSpeed(speed, isForward);
+      break;
+    case STEER_CENTER:
+      motorFrontLeft.setSpeed(speed, isForward);
+      motorFrontRight.setSpeed(speed, isForward);
+      motorBackLeft.setSpeed(speed, isForward);
+      motorBackRight.setSpeed(speed, isForward);
+      break;
+    case STEER_HALF_RIGHT:
+      motorFrontLeft.setSpeed(speed, isForward);
+      motorFrontRight.setSpeed(speed, 0);
+      motorBackLeft.setSpeed(speed, isForward);
+      motorBackRight.setSpeed(speed, 0);
+      break;
+    case STEER_FULL_RIGHT:
+      motorFrontLeft.setSpeed(speed, isForward);
+      motorFrontRight.setSpeed(speed, !isForward);
+      motorBackLeft.setSpeed(speed, isForward);
+      motorBackRight.setSpeed(speed, !isForward);
+      break;
+  }
+
+  previous_isForward = isForward;
+}
+
+void handleStopOnEntry() {
+  motors_stop();
+  prev_direction_state = direction_state;
+  delay(500);
+  Serial.println("Stopped (on entry)");
+}
+
+void changeState(direction_state_e newState) {
+  prev_direction_state = direction_state;
+  direction_state = newState;
+  Serial.print("Old state: ");
+  //printState(prev_direction_state, true);
+  Serial.print("Change State: ");
+  //printState(direction_state, true);
+}
+
+void start_moving() {
+  // do nothing or maybe remove brakes only here?
+}
+
+void handleStop() {
+
+  previous_isForward = THROTTLE_VALUE > 0;
+
+  if (IS_ARMED && THROTTLE_VALUE != 0) {
+    Serial.print("Throttle: ");
+    Serial.println(THROTTLE_VALUE);
+    start_moving();
+
+    if (isForward) {
+      changeState(MOVING_FORWARD);
+    } else {
+      changeState(MOVING_BACKWARD);
+    }
+  }
+  // else {
+  //   Serial.print("handleStop: ");
+  //   Serial.print(IS_ARMED);
+  //   Serial.print(", Throttle: ");
+  //   Serial.println(THROTTLE_VALUE);
+  // }
+}
+
+void motors_stop() {
+  motorFrontLeft.stop();
+  motorFrontRight.stop();
+  motorBackLeft.stop();
+  motorBackRight.stop();
+}
+
+void motors_brakes_on() {
+  motorFrontLeft.brakes_on();
+  motorFrontRight.brakes_on();
+  motorBackLeft.brakes_on();
+  motorBackRight.brakes_on();
+}
+
+void motors_brakes_off() {
+  motorFrontLeft.brakes_off();
+  motorFrontRight.brakes_off();
+  motorBackLeft.brakes_off();
+  motorBackRight.brakes_off();
 }
 
 bool isFailsafeSignature() {
