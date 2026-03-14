@@ -24,16 +24,17 @@
 #define M2_SPEED_FEEDBACK_PIN 3
 
 // Motor Back Left
-#define M3_DIR_PIN 42
-#define M3_BRAKE_PIN 43
-#define M3_THROTTLE_PIN 44
-#define M3_SPEED_FEEDBACK_PIN A8
+#define M3_DIR_PIN 47
+#define M3_BRAKE_PIN 46
+#define M3_THROTTLE_PIN 45
+#define M3_SPEED_FEEDBACK_PIN A9
 
 // Motor Back Right
-#define M4_DIR_PIN 48
-#define M4_BRAKE_PIN 47
-#define M4_THROTTLE_PIN 46
-#define M4_SPEED_FEEDBACK_PIN A9
+#define M4_DIR_PIN 42
+#define M4_BRAKE_PIN 43
+#define M4_THROTTLE_PIN 44
+#define M4_SPEED_FEEDBACK_PIN A8
+
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
@@ -103,10 +104,10 @@ const float filter = 0.2;  // => 1 / number of samples
 PwmReader throttle(filter);
 PwmReader steering(filter);
 
-Motor motorFrontLeft(M1_DIR_PIN, M1_BRAKE_PIN, M1_THROTTLE_PIN, false);
-Motor motorFrontRight(M2_DIR_PIN, M2_BRAKE_PIN, M2_THROTTLE_PIN, true);
-Motor motorBackLeft(M3_DIR_PIN, M3_BRAKE_PIN, M3_THROTTLE_PIN, false);
-Motor motorBackRight(M4_DIR_PIN, M4_BRAKE_PIN, M4_THROTTLE_PIN, true);
+Motor motorFrontLeft(M1_DIR_PIN, M1_BRAKE_PIN, M1_THROTTLE_PIN, true);
+Motor motorFrontRight(M2_DIR_PIN, M2_BRAKE_PIN, M2_THROTTLE_PIN, false);
+Motor motorBackLeft(M3_DIR_PIN, M3_BRAKE_PIN, M3_THROTTLE_PIN, true);
+Motor motorBackRight(M4_DIR_PIN, M4_BRAKE_PIN, M4_THROTTLE_PIN, false);
 
 void setup() {
   Serial.begin(115200);
@@ -124,7 +125,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(RC_STEERING_PIN), handle_interrupt_3, CHANGE);
 
 
-  throttle.setLimits(980, 2000, 1490, 20);
+  throttle.setLimits(980, 2000, 1465, 30);
   throttle.setMapping(-70, 70);  // max speed 255
 
   steering.setLimits(880, 1700, 1380, 60);
@@ -141,10 +142,11 @@ void printDebug() {
   Serial.print(IS_CONNECTED);
 
 
-  // Serial.print("Throttle Map:");
-  // Serial.print(THROTTLE_VALUE);
-  // Serial.print(", ArmedVal:");
-  // Serial.print(pwm_values[1]);
+  Serial.print("Throttle Map:");
+  Serial.print(THROTTLE_VALUE);
+
+  Serial.print(", ArmedVal:");
+  Serial.print(pwm_values[1]);
   Serial.print(", Armed:");
   Serial.print(IS_ARMED);
 
@@ -170,21 +172,44 @@ bool stateHasChanged() {
 
 elapsedMillis sincePrint;
 
+int speed = 0;
+int i = 0;
+int speeds[] = {0, 30, 60, 90, 110, 140, 110, 90, 60, 30, 0};
 void loop() {
+
+// if (sincePrint > 1000) {
+
+//   sincePrint = 0;
+//   speed = speeds[i];
+//   motorFrontLeft.setSpeed(speed, true);
+//   //motorFrontRight.setSpeed(speed, true);
+//   motorBackLeft.setSpeed(speed, true);
+//   motorBackRight.setSpeed(speed, true);
+//   i = (i+1) % 11;
+// }
+//   return;
+
+
   updateConnectionState();
 
-  if (!IsHealthyConnection()) {
-    disarm();
-  } else {
+  // if (!IsHealthyConnection()) {
+  //   disarm();
+  //   Serial.println("Not healthy connection");
+  // } else {
     mapValues();
+  //}
+
+  if (sincePrint > 1000) {
+    sincePrint = 0;
+    printDebug();
   }
 
   if (!IS_ARMED) {
-    motors_brakes_on();
+    //motors_brakes_on();
     return;
   }
 
-  motors_brakes_off();
+  //motors_brakes_off();
 
   switch (direction_state) {
     case STOPPED:
@@ -203,12 +228,6 @@ void loop() {
     case MOVING_FORWARD:
       handleMoving();
       break;
-  }
-
-
-  if (sincePrint > 1000) {
-    sincePrint = 0;
-    printDebug();
   }
 
   delay(20);
@@ -250,39 +269,34 @@ void handleMoving() {
     return;
   }
 
-  uint8_t speed = abs(THROTTLE_VALUE);
+  uint8_t speed_left = abs(THROTTLE_VALUE);
+  uint8_t speed_right = abs(THROTTLE_VALUE);
+  bool dir_left = isForward;
+  bool dir_right = isForward;
+
   switch (STEERING_VALUE) {
     case STEER_FULL_LEFT:
-      motorFrontLeft.setSpeed(speed, !isForward);
-      motorFrontRight.setSpeed(speed, isForward);
-      motorBackLeft.setSpeed(speed, !isForward);
-      motorBackRight.setSpeed(speed, isForward);
+      dir_left = !isForward;
       break;
     case STEER_HALF_LEFT:
-      motorFrontLeft.setSpeed(speed, 0);
-      motorFrontRight.setSpeed(speed, isForward);
-      motorBackLeft.setSpeed(speed, 0);
-      motorBackRight.setSpeed(speed, isForward);
+      speed_left = 0;
+      dir_left = !isForward;
       break;
     case STEER_CENTER:
-      motorFrontLeft.setSpeed(speed, isForward);
-      motorFrontRight.setSpeed(speed, isForward);
-      motorBackLeft.setSpeed(speed, isForward);
-      motorBackRight.setSpeed(speed, isForward);
       break;
     case STEER_HALF_RIGHT:
-      motorFrontLeft.setSpeed(speed, isForward);
-      motorFrontRight.setSpeed(speed, 0);
-      motorBackLeft.setSpeed(speed, isForward);
-      motorBackRight.setSpeed(speed, 0);
+      speed_right = 0;
+      dir_right = !isForward;
       break;
     case STEER_FULL_RIGHT:
-      motorFrontLeft.setSpeed(speed, isForward);
-      motorFrontRight.setSpeed(speed, !isForward);
-      motorBackLeft.setSpeed(speed, isForward);
-      motorBackRight.setSpeed(speed, !isForward);
+      dir_right = !isForward;
       break;
   }
+
+  motorFrontLeft.setSpeed(speed_left, dir_left);
+  motorFrontRight.setSpeed(speed_right, dir_right);
+  motorBackLeft.setSpeed(speed_left, dir_left);
+  motorBackRight.setSpeed(speed_right, dir_right);
 
   previous_isForward = isForward;
 }

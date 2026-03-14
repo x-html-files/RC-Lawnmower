@@ -19,5 +19,6 @@ class PwmReader {
     int _toLow;
     int _toHigh;
     int _toMiddle;
+    int bucketMap(int input, int inLow, int inHigh, int outLow, int outHigh);
 };
 #endif

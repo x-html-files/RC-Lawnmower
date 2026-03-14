@@ -1,5 +1,6 @@
 #ifndef Motor_h
 #define Motor_h
+#include <Ewma.h>
 
 class Motor {
 public:
@@ -13,6 +14,7 @@ private:
   uint8_t _brakePin;
   uint8_t _throttlePin;
   bool _reversedDirection;
+  Ewma adcFilter;
 };
 
 #endif

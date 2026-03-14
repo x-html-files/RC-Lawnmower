@@ -29,6 +29,16 @@ void PwmReader::setLimits(int fromLow, int fromHigh, int center, int center_thre
   _centerTo = center + center_threshold;
 }
 
+int PwmReader::bucketMap(int input, int inLow, int inHigh, int outLow, int outHigh) {
+    int numBuckets = outHigh - outLow + 1;          // = 3 buckets (2, 3, 4)
+    int inputRange = inHigh - inLow;
+    int bucket = (long)(input - inLow) * numBuckets / (inputRange + 1);
+    // Clamp to valid range
+    if (bucket < 0) bucket = 0;
+    if (bucket >= numBuckets) bucket = numBuckets - 1;
+    return outLow + bucket;
+}
+
 int PwmReader::mapTo(int v)
 {
   v = adcFilter.filter(v); 
@@ -48,7 +58,7 @@ int PwmReader::mapTo(int v)
   // from zero to lower middle
   if(v <= _centerFrom)
   {    
-    return map(v, _fromLow,  _centerFrom, _toLow, _toMiddle);
+    return bucketMap(v, _fromLow,  _centerFrom, _toLow, _toMiddle);
   }
 
   // lower middle to higher middle
@@ -58,5 +68,5 @@ int PwmReader::mapTo(int v)
   }
   
   // higher middle to highest
-  return map(v, _centerTo,  _fromHigh, _toMiddle, _toHigh);
+  return bucketMap(v, _centerTo,  _fromHigh, _toMiddle, _toHigh);
 }
